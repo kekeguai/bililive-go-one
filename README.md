@@ -24,6 +24,7 @@
 ```bash
 # 1. 将脚本保存为 bili.sh
 # 2. 执行安装，按提示输入监听端口（例如 65510，直接回车则使用 8080）
+curl -o https://raw.githubusercontent.com/kekeguai/bililive-go-/refs/heads/main/bili.sh
 sudo bash bili.sh install
 ```
 
