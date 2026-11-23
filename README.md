@@ -8,7 +8,7 @@
 - **一键部署**：从 GitHub Release 元数据中选择对应 Linux 架构的预编译二进制，并在发布提供校验值时验证 SHA256，无需编译环境
 - **多包管理器**：支持 apt、dnf、yum、pacman（安装时同时安装用于 Release 元数据解析的 jq）
 - **自定义端口**：安装时交互输入监听端口（默认 `8080`），并校验端口范围与占用情况
-- **命令行管理**：安装后直接使用 `bili` 命令进行服务管理
+- **交互菜单与命令行管理**：可按数字选择常用操作，也可使用 `bili restart` 等命令行子命令
 - **版本更新**：对比 GitHub 最新 Release，支持一键更新，失败自动回滚
 - **开机自启**：有 systemd 时注册为服务，异常退出自动拉起
 - **无 systemd 兼容**：自动退化为后台进程方式运行
@@ -30,23 +30,33 @@
 curl -fsSL https://raw.githubusercontent.com/kekeguai/bililive-go-one/refs/heads/main/bili.sh -o bili.sh && sudo bash bili.sh
 ```
 
-脚本会显示数字菜单：选择 `1` 一键安装并按提示自选监听端口；选择 `2` 重启服务；其余选项可启动/停止服务、查看状态、修改端口、更新、查看日志或卸载。安装完成后直接运行 `sudo bili` 同样可进入菜单。
+脚本默认进入交互菜单。选择安装后按提示输入监听端口（默认 `8080`）。安装完成后，脚本会复制到 `/usr/local/sbin/bili`；运行 `sudo bili` 可再次打开菜单。
 
-### 方式二：使用 wget 下载
+### 数字菜单
+
+| 数字 | 功能 |
+| --- | --- |
+| `1` | 一键安装并自选监听端口 |
+| `2` | 重启服务 |
+| `3` | 启动服务 |
+| `4` | 停止服务 |
+| `5` | 查看服务状态、版本和访问地址 |
+| `6` | 修改监听端口 |
+| `7` | 检查并更新 bililive-go |
+| `8` | 查看运行日志 |
+| `9` | 卸载 bililive-go（需确认） |
+| `0` | 退出菜单 |
+
+操作后按回车可返回菜单。菜单需要交互式终端；自动化场景请使用下方命令行子命令。
+
+也可用 `wget` 下载后运行：
 
 ```bash
 wget -O bili.sh https://raw.githubusercontent.com/kekeguai/bililive-go-one/refs/heads/main/bili.sh
 sudo bash bili.sh
 ```
 
-### 方式三：手动粘贴保存
-
-```bash
-nano bili.sh      # 粘贴脚本内容后 Ctrl+O 保存，Ctrl+X 退出
-sudo bash bili.sh
-```
-
-选择菜单 `1` 后，安装过程中会提示输入监听端口（例如 `65510`，直接回车则使用 `8080`）。安装完成后，脚本会被复制到 `/usr/local/sbin/bili`，之后可直接运行 `sudo bili` 打开菜单，也可以使用下方命令行子命令。
+安装完成后，脚本会被复制到 `/usr/local/sbin/bili`。
 
 ### ffmpeg 安装说明
 
@@ -75,7 +85,7 @@ Fedora 下若 dnf 无法直接安装 ffmpeg，同样需要先启用 RPM Fusion F
 
 | 命令 | 说明 |
 | --- | --- |
-| `bili` / `bili menu` | 打开数字菜单，包含安装与服务管理功能 |
+| `bili` / `bili menu` | 打开数字菜单 |
 | `bili install` | 安装 ffmpeg 与 bililive-go，交互输入监听端口 |
 | `bili start` | 启动服务 |
 | `bili stop` | 停止服务 |
@@ -87,6 +97,8 @@ Fedora 下若 dnf 无法直接安装 ffmpeg，同样需要先启用 RPM Fusion F
 | `bili uninstall` | 卸载 bililive-go（会删除配置与录制数据，需确认，不删除 ffmpeg） |
 
 ## 使用示例
+
+自动化或直接执行单项操作时，可使用命令行子命令：
 
 ```bash
 sudo bili status          # 查看状态、版本、ffmpeg 与访问地址
@@ -101,7 +113,7 @@ sudo bili uninstall       # 卸载
 
 ## 访问 Web 管理页面
 
-执行 `bili status` 或在菜单选择“查看服务状态”、安装完成后会输出访问地址，格式如下：
+执行 `sudo bili status`、在菜单选择“查看服务状态”或安装完成后，都会输出访问地址：
 
 ```
 Web 管理页面 : http://服务器IP:65510
@@ -115,7 +127,7 @@ Web 管理页面 : http://服务器IP:65510
 
 | 路径 | 说明 |
 | --- | --- |
-| `/usr/local/sbin/bili` | 管理脚本本体 |
+| `/usr/local/sbin/bili` | 管理脚本；无参数运行打开交互菜单 |
 | `/opt/bililive-go/bililive-go` | bililive-go 可执行文件 |
 | `/opt/bililive-go/config.yml` | 配置文件 |
 | `/opt/bililive-go/data` | 录制数据目录 |
