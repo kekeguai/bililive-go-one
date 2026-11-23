@@ -96,21 +96,6 @@ Fedora 下若 dnf 无法直接安装 ffmpeg，同样需要先启用 RPM Fusion F
 | `bili log` | 查看运行日志 |
 | `bili uninstall` | 卸载 bililive-go（会删除配置与录制数据，需确认，不删除 ffmpeg） |
 
-## 使用示例
-
-自动化或直接执行单项操作时，可使用命令行子命令：
-
-```bash
-sudo bili status          # 查看状态、版本、ffmpeg 与访问地址
-sudo bili restart         # 重启服务
-sudo bili stop            # 停止服务
-sudo bili start           # 启动服务
-sudo bili port 65510      # 修改监听端口
-sudo bili update          # 检查并更新版本
-sudo bili log             # 查看日志
-sudo bili uninstall       # 卸载
-```
-
 ## 访问 Web 管理页面
 
 执行 `sudo bili status`、在菜单选择“查看服务状态”或安装完成后，都会输出访问地址：
