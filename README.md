@@ -27,24 +27,26 @@
 ### 方式一：一行命令安装（推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kekeguai/bililive-go-one/refs/heads/main/bili.sh -o bili.sh && sudo bash bili.sh install
+curl -fsSL https://raw.githubusercontent.com/kekeguai/bililive-go-one/refs/heads/main/bili.sh -o bili.sh && sudo bash bili.sh
 ```
+
+脚本会显示数字菜单：选择 `1` 一键安装并按提示自选监听端口；选择 `2` 重启服务；其余选项可启动/停止服务、查看状态、修改端口、更新、查看日志或卸载。安装完成后直接运行 `sudo bili` 同样可进入菜单。
 
 ### 方式二：使用 wget 下载
 
 ```bash
 wget -O bili.sh https://raw.githubusercontent.com/kekeguai/bililive-go-one/refs/heads/main/bili.sh
-sudo bash bili.sh install
+sudo bash bili.sh
 ```
 
 ### 方式三：手动粘贴保存
 
 ```bash
 nano bili.sh      # 粘贴脚本内容后 Ctrl+O 保存，Ctrl+X 退出
-sudo bash bili.sh install
+sudo bash bili.sh
 ```
 
-安装过程中会提示输入监听端口（例如 `65510`，直接回车则使用 `8080`）。安装完成后，脚本会被复制到 `/usr/local/sbin/bili`，之后即可直接使用 `bili` 命令。
+选择菜单 `1` 后，安装过程中会提示输入监听端口（例如 `65510`，直接回车则使用 `8080`）。安装完成后，脚本会被复制到 `/usr/local/sbin/bili`，之后可直接运行 `sudo bili` 打开菜单，也可以使用下方命令行子命令。
 
 ### ffmpeg 安装说明
 
@@ -73,6 +75,7 @@ Fedora 下若 dnf 无法直接安装 ffmpeg，同样需要先启用 RPM Fusion F
 
 | 命令 | 说明 |
 | --- | --- |
+| `bili` / `bili menu` | 打开数字菜单，包含安装与服务管理功能 |
 | `bili install` | 安装 ffmpeg 与 bililive-go，交互输入监听端口 |
 | `bili start` | 启动服务 |
 | `bili stop` | 停止服务 |
@@ -98,7 +101,7 @@ sudo bili uninstall       # 卸载
 
 ## 访问 Web 管理页面
 
-执行 `bili status` 或安装完成后会输出访问地址，格式如下：
+执行 `bili status` 或在菜单选择“查看服务状态”、安装完成后会输出访问地址，格式如下：
 
 ```
 Web 管理页面 : http://服务器IP:65510

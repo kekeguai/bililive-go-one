@@ -571,6 +571,7 @@ usage() {
 bili - bililive-go 管理工具
 
 用法:
+  bili                    打开交互菜单
   bili install            安装 ffmpeg 与 bililive-go，交互输入监听端口
   bili start              启动服务
   bili stop               停止服务
@@ -583,18 +584,83 @@ bili - bililive-go 管理工具
 EOF
 }
 
+show_menu() {
+    cat <<'EOF'
+bili - bililive-go 一键部署与管理
+
+  1) 一键安装（可自选监听端口）
+  2) 重启服务
+  3) 启动服务
+  4) 停止服务
+  5) 查看服务状态
+  6) 修改监听端口
+  7) 更新 bililive-go
+  8) 查看运行日志
+  9) 卸载 bililive-go
+  0) 退出
+EOF
+}
+
+run_menu_action() {
+    case "$1" in
+        1) cmd_install ;;
+        2) cmd_restart ;;
+        3) cmd_start ;;
+        4) cmd_stop ;;
+        5) cmd_status ;;
+        6) cmd_port "" ;;
+        7) cmd_update ;;
+        8) cmd_log ;;
+        9) cmd_uninstall ;;
+        0) return 2 ;;
+        *) warn "无效选项，请输入 0-9"; return 0 ;;
+    esac
+}
+
+menu_is_interactive() { [[ -t 0 && -t 1 ]]; }
+
+main_menu() {
+    local choice
+    if ! menu_is_interactive; then
+        warn "菜单需要交互式终端；自动化请使用 bili install/start/stop/restart 等命令"
+        usage >&2
+        return 2
+    fi
+
+    while true; do
+        show_menu
+        if ! read -rp "请输入选项 [0-9]: " choice; then
+            printf '\n已退出菜单。\n'
+            return 0
+        fi
+        if run_menu_action "$choice"; then
+            read -rp "按回车返回菜单..." _ || return 0
+        else
+            local action_status=$?
+            (( action_status == 2 )) && return 0
+            return "$action_status"
+        fi
+    done
+}
+
 # ---------- 入口 ----------
 if [[ "${BILI_SCRIPT_LIBRARY_ONLY:-0}" != 1 ]]; then
-    case "${1:-help}" in
-        install)   cmd_install ;;
-        start)     cmd_start ;;
-        stop)      cmd_stop ;;
-        restart)   cmd_restart ;;
-        status)    cmd_status ;;
-        port)      cmd_port "${2:-}" ;;
-        update)    cmd_update ;;
-        log)       cmd_log ;;
-        uninstall) cmd_uninstall ;;
-        *)         usage ;;
-    esac
+    if (( $# == 0 )); then
+        main_menu
+    else
+        case "$1" in
+            install)   cmd_install ;;
+            start)     cmd_start ;;
+            stop)      cmd_stop ;;
+            restart)   cmd_restart ;;
+            status)    cmd_status ;;
+            port)      cmd_port "${2:-}" ;;
+            update)    cmd_update ;;
+            log)       cmd_log ;;
+            uninstall) cmd_uninstall ;;
+            help|-h|--help) usage ;;
+            menu)      main_menu ;;
+            *)         usage; exit 2 ;;
+        esac
+    fi
 fi
