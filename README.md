@@ -5,8 +5,8 @@
 ## 特性
 
 - **完整安装**：自动安装 ffmpeg 与 bililive-go，流程与[官方 Install Linux 文档](https://github.com/bililive-go/bililive-go/wiki/Install-Linux)一致
-- **一键部署**：自动下载 GitHub Releases 中对应架构的预编译二进制，无需编译环境
-- **多包管理器**：支持 apt、dnf、yum、pacman
+- **一键部署**：从 GitHub Release 元数据中选择对应 Linux 架构的预编译二进制，并在发布提供校验值时验证 SHA256，无需编译环境
+- **多包管理器**：支持 apt、dnf、yum、pacman（安装时同时安装用于 Release 元数据解析的 jq）
 - **自定义端口**：安装时交互输入监听端口（默认 `8080`），并校验端口范围与占用情况
 - **命令行管理**：安装后直接使用 `bili` 命令进行服务管理
 - **版本更新**：对比 GitHub 最新 Release，支持一键更新，失败自动回滚
@@ -20,7 +20,7 @@
 - root 权限（或 sudo）
 - 可访问 GitHub（用于获取版本信息、下载脚本与二进制）
 - 可访问系统软件源（用于安装 ffmpeg）
-- 支持架构：`x86_64`、`aarch64`、`armv7l`、`armv6l`、`i386`
+- 支持架构：`x86_64`、`aarch64`、`armv7l`、`i386`（ARMv6 暂不支持）
 
 ## 安装
 
@@ -117,7 +117,7 @@ Web 管理页面 : http://服务器IP:65510
 | `/opt/bililive-go/config.yml` | 配置文件 |
 | `/opt/bililive-go/data` | 录制数据目录 |
 | `/opt/bililive-go/version` | 当前安装版本记录 |
-| `/opt/bililive-go/bililive-go.log` | 运行日志（无 systemd 时及 systemd 输出日志） |
+| `/opt/bililive-go/bililive.log` | 运行日志（无 systemd 时及 systemd 输出日志） |
 | `/etc/systemd/system/bililive-go.service` | systemd 服务文件 |
 
 ## 注意事项
@@ -127,8 +127,8 @@ Web 管理页面 : http://服务器IP:65510
 3. **端口选择**：建议使用 1024–65535 之间未被占用的端口，例如 `65510`。
 4. **配置修改**：脚本生成的 `config.yml` 为最小配置。Cookie、录制规则、推送等可在 Web 管理页面中设置，也可直接编辑配置文件后执行 `bili restart`。
 5. **RPC 与 Web 共用端口**：Web 管理页面与 RPC 使用同一个 `rpc.port` 配置项，修改端口即同时修改两者。
-6. **更新机制**：`bili update` 会先备份当前二进制，下载失败时自动回滚；更新期间服务会短暂停止。
-7. **下载文件名**：脚本按 `bililive-go_<架构>_<版本>.tar.gz` 的命名规则下载。若官方发布的文件名有变化，需同步修改脚本中 `download_binary` 函数的 URL 规则。
+6. **更新机制**：`bili update` 会先在服务运行期间下载、解包并校验新版本；发布前备份当前二进制和版本记录，只有原本运行的服务才会在切换期间短暂停止。新版本启动失败时会尝试恢复旧二进制、版本记录和原运行状态；只有确认新版本运行后才删除备份。若回滚操作本身也失败，脚本会报告并保留备份目录供人工恢复。
+7. **发布资产**：脚本从 Release API 精确选择对应 Linux 架构的资产，并在发布元数据提供 SHA256 时校验内容；若资产命名或 API 格式变化，会明确中止，而不会替换当前版本。
 8. **卸载不删除 ffmpeg**：ffmpeg 是系统组件，可能被其他程序使用，如需删除请手动执行包管理器命令。
 9. **无 systemd 环境**：服务以后台进程运行，不会开机自启。
 

@@ -10,16 +10,16 @@ set -u
 
 APP_NAME="bililive-go"
 REPO="bililive-go/bililive-go"
-INSTALL_DIR="/opt/bililive-go"
+INSTALL_DIR="${BILI_INSTALL_DIR:-/opt/bililive-go}"
 BIN_PATH="${INSTALL_DIR}/bililive-go"
 CONF_FILE="${INSTALL_DIR}/config.yml"
 DATA_DIR="${INSTALL_DIR}/data"
 LOG_FILE="${INSTALL_DIR}/bililive.log"
 PID_FILE="${INSTALL_DIR}/bililive.pid"
 VER_FILE="${INSTALL_DIR}/version"
-SCRIPT_DST="/usr/local/sbin/bili"
+SCRIPT_DST="${BILI_SCRIPT_DST:-/usr/local/sbin/bili}"
 SERVICE_NAME="bililive-go"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SERVICE_FILE="${BILI_SERVICE_FILE:-/etc/systemd/system/${SERVICE_NAME}.service}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info() { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -38,20 +38,21 @@ port_in_use() {
 
 get_arch() {
     case "$(uname -m)" in
-        x86_64|amd64)  echo "linux_amd64" ;;
-        aarch64|arm64) echo "linux_arm64" ;;
-        armv7l|armv7)  echo "linux_armv7" ;;
-        armv6l)        echo "linux_armv6" ;;
-        i386|i686)     echo "linux_386" ;;
-        *) err "不支持的架构: $(uname -m)" ;;
+        x86_64|amd64)  echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        armv7l|armv7)  echo "arm" ;;
+        i386|i686)     echo "386" ;;
+        *) warn "不支持的架构: $(uname -m)" >&2; return 1 ;;
     esac
 }
 
 get_latest_version() {
-    local v
-    v=$(curl -fsSL --max-time 15 "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-    [[ -n "$v" ]] || err "无法获取最新版本信息，请检查网络或 GitHub 访问"
+    local release_json v
+    command -v jq >/dev/null 2>&1 || err "缺少 jq，请先安装 jq 后重试"
+    release_json=$(curl -fsSL --max-time 15 "https://api.github.com/repos/${REPO}/releases/latest") \
+        || err "无法获取最新版本信息，请检查网络或 GitHub 访问"
+    v=$(jq -er '.tag_name | select(type == "string" and length > 0)' <<< "$release_json") \
+        || err "GitHub Release 信息格式无效"
     echo "$v"
 }
 
@@ -72,13 +73,13 @@ install_deps() {
     info "安装基础依赖..."
     if command -v apt-get &>/dev/null; then
         apt-get update -y >/dev/null
-        apt-get install -y curl tar ca-certificates iproute2 >/dev/null
+        apt-get install -y curl tar ca-certificates iproute2 jq >/dev/null
     elif command -v dnf &>/dev/null; then
-        dnf install -y curl tar ca-certificates iproute >/dev/null
+        dnf install -y curl tar ca-certificates iproute jq >/dev/null
     elif command -v yum &>/dev/null; then
-        yum install -y curl tar ca-certificates iproute >/dev/null
+        yum install -y curl tar ca-certificates iproute jq >/dev/null
     elif command -v pacman &>/dev/null; then
-        pacman -Sy --noconfirm --needed curl tar ca-certificates iproute2 >/dev/null
+        pacman -Sy --noconfirm --needed curl tar ca-certificates iproute2 jq >/dev/null
     else
         warn "未识别的包管理器，请确保已安装 curl、tar"
     fi
@@ -131,20 +132,99 @@ install_ffmpeg() {
 }
 
 # ---------- 下载与安装二进制 ----------
-download_binary() {
-    local tag="$1" arch ver url tmp found
-    arch=$(get_arch)
-    ver="${tag#v}"
-    url="https://github.com/${REPO}/releases/download/${tag}/bililive-go_${arch}_${ver}.tar.gz"
-    tmp=$(mktemp -d)
-    info "下载 ${APP_NAME} ${tag} (${arch})..."
-    curl -fL --retry 3 --max-time 300 -o "$tmp/pkg.tar.gz" "$url" || { rm -rf "$tmp"; err "下载失败: $url"; }
-    tar -xzf "$tmp/pkg.tar.gz" -C "$tmp" || { rm -rf "$tmp"; err "解压失败"; }
-    found=$(find "$tmp" -type f -name 'bililive-go' | head -1)
-    [[ -n "$found" ]] || { rm -rf "$tmp"; err "压缩包中未找到 bililive-go 可执行文件"; }
-    install -m 755 "$found" "$BIN_PATH"
-    echo "$tag" > "$VER_FILE"
-    rm -rf "$tmp"
+PREPARED_DIR=""
+PREPARED_BINARY=""
+
+release_asset_for_tag() {
+    local tag="$1" arch="$2" release_json asset_name
+    command -v jq >/dev/null 2>&1 || { warn "缺少 jq，请先安装 jq 后重试" >&2; return 1; }
+    release_json=$(curl -fsSL --max-time 15 "https://api.github.com/repos/${REPO}/releases/tags/${tag}") \
+        || { warn "无法获取 ${tag} 的发布信息" >&2; return 1; }
+    asset_name="bililive-${arch}.tar.gz"
+    jq -er --arg name "$asset_name" \
+        '.assets | map(select(.name == $name)) | if length == 1 then .[0] | [.browser_download_url, (.digest // "")] | @tsv else empty end' \
+        <<< "$release_json"
+}
+
+cleanup_prepared_binary() {
+    [[ -n "$PREPARED_DIR" ]] && rm -rf "$PREPARED_DIR"
+    PREPARED_DIR=""
+    PREPARED_BINARY=""
+}
+
+prepare_binary() {
+    local tag="$1" arch asset url digest actual found
+    PREPARED_DIR=""
+    PREPARED_BINARY=""
+    arch=$(get_arch) || return 1
+    asset=$(release_asset_for_tag "$tag" "$arch") || { warn "Release 中未找到 Linux ${arch} 资产" >&2; return 1; }
+    IFS=$'\t' read -r url digest <<< "$asset"
+    digest=${digest:-}
+    [[ "$url" == "https://github.com/${REPO}/releases/download/"* ]] \
+        || { warn "Release 资产下载地址无效" >&2; return 1; }
+
+    PREPARED_DIR=$(mktemp -d) || { warn "无法创建临时目录" >&2; return 1; }
+    info "下载 ${APP_NAME} ${tag} (linux-${arch})..."
+    if ! curl -fL --retry 3 --max-time 300 -o "$PREPARED_DIR/pkg.tar.gz" "$url"; then
+        warn "下载失败: $url" >&2
+        cleanup_prepared_binary
+        return 1
+    fi
+    if [[ -n "$digest" ]]; then
+        if [[ ! "$digest" =~ ^sha256:[[:xdigit:]]{64}$ ]]; then
+            warn "Release 提供的 SHA256 格式无效" >&2
+            cleanup_prepared_binary
+            return 1
+        fi
+        actual=$(sha256sum "$PREPARED_DIR/pkg.tar.gz") || {
+            warn "无法计算发布包 SHA256" >&2
+            cleanup_prepared_binary
+            return 1
+        }
+        actual=${actual%% *}
+        if [[ "${digest#sha256:}" != "$actual" ]]; then
+            warn "发布包 SHA256 校验失败" >&2
+            cleanup_prepared_binary
+            return 1
+        fi
+    fi
+    if ! tar -xzf "$PREPARED_DIR/pkg.tar.gz" -C "$PREPARED_DIR"; then
+        warn "解压失败" >&2
+        cleanup_prepared_binary
+        return 1
+    fi
+    found=$(find "$PREPARED_DIR" -type f -name 'bililive-go' -print -quit)
+    if [[ -z "$found" || ! -s "$found" ]]; then
+        warn "压缩包中未找到有效的 bililive-go 可执行文件" >&2
+        cleanup_prepared_binary
+        return 1
+    fi
+    if ! chmod 755 "$found"; then
+        warn "无法设置 bililive-go 执行权限" >&2
+        cleanup_prepared_binary
+        return 1
+    fi
+    PREPARED_BINARY="$found"
+}
+
+publish_prepared_binary() {
+    local tag="$1" binary_tmp="${BIN_PATH}.new.$$" version_tmp="${VER_FILE}.new.$$"
+    if ! install -m 755 "$PREPARED_BINARY" "$binary_tmp"; then
+        rm -f "$binary_tmp" "$version_tmp"
+        return 1
+    fi
+    if ! printf '%s\n' "$tag" > "$version_tmp"; then
+        rm -f "$binary_tmp" "$version_tmp"
+        return 1
+    fi
+    if ! mv -f "$binary_tmp" "$BIN_PATH"; then
+        rm -f "$binary_tmp" "$version_tmp"
+        return 1
+    fi
+    if ! mv -f "$version_tmp" "$VER_FILE"; then
+        rm -f "$version_tmp"
+        return 1
+    fi
 }
 
 write_config() {
@@ -209,6 +289,15 @@ svc_running() {
     if has_systemd; then systemctl is-active --quiet "$SERVICE_NAME"; else bg_running; fi
 }
 
+wait_for_service_running() {
+    local attempt
+    for (( attempt = 0; attempt < 5; attempt++ )); do
+        svc_running && return 0
+        sleep 1
+    done
+    svc_running
+}
+
 # ---------- 防火墙 ----------
 open_firewall() {
     if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
@@ -261,8 +350,10 @@ cmd_install() {
         break
     done
 
-    local tag; tag=$(get_latest_version)
-    download_binary "$tag"
+    local tag; tag=$(get_latest_version) || err "无法确定 bililive-go 版本"
+    prepare_binary "$tag" || err "无法准备 bililive-go ${tag}"
+    publish_prepared_binary "$tag" || { cleanup_prepared_binary; err "无法安装 bililive-go ${tag}"; }
+    cleanup_prepared_binary
     write_config "$port"
 
     if [[ "$(readlink -f "$0")" != "$SCRIPT_DST" ]]; then
@@ -335,9 +426,64 @@ cmd_port() {
     print_access "$new"
 }
 
+rollback_update() {
+    local backup_dir="$1" current="$2" had_version="$3" was_running="$4" rollback_ok=1 can_restore=1 can_start_old=1
+
+    if svc_running; then
+        svc_stop || warn "停止新版本服务的命令返回失败，正在核实实际状态"
+        if svc_running; then
+            warn "回滚时无法确认新版本服务已停止；旧版备份保留"
+            rollback_ok=0
+            can_restore=0
+        fi
+    fi
+    if (( can_restore )); then
+        if ! mv -f "$backup_dir/bililive-go" "$BIN_PATH"; then
+            warn "无法恢复旧版二进制"
+            rollback_ok=0
+            can_start_old=0
+        fi
+        if (( had_version )); then
+            if ! mv -f "$backup_dir/version" "$VER_FILE"; then
+                warn "无法恢复旧版本记录"
+                rollback_ok=0
+            fi
+        elif ! rm -f "$VER_FILE"; then
+            warn "无法清除新版本记录"
+            rollback_ok=0
+        fi
+    else
+        can_start_old=0
+    fi
+
+    if (( was_running )); then
+        if (( can_start_old )) && ! svc_running && ! svc_start; then
+            warn "无法重新启动旧版本服务"
+            rollback_ok=0
+        fi
+        if ! svc_running; then
+            warn "旧版本服务未能恢复运行"
+            rollback_ok=0
+        fi
+    elif (( can_restore )) && svc_running; then
+        if ! svc_stop || svc_running; then
+            warn "无法恢复升级前的停止状态"
+            rollback_ok=0
+        fi
+    fi
+
+    if (( rollback_ok )); then
+        rm -rf "$backup_dir"
+        info "已回滚到 $2"
+    else
+        warn "自动回滚未能完全完成；旧版备份保留在 $backup_dir"
+    fi
+    return "$(( rollback_ok ? 0 : 1 ))"
+}
+
 cmd_update() {
     need_root; [[ -f "$BIN_PATH" ]] || err "未安装"
-    local latest current
+    local latest current was_running=0 had_version=0 backup_dir
     latest=$(get_latest_version)
     current=$(get_local_version)
     info "当前版本: $current    最新版本: $latest"
@@ -347,18 +493,51 @@ cmd_update() {
     read -rp "是否更新到 $latest? [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] || { info "已取消"; return; }
 
-    local was_running=0
-    if svc_running; then was_running=1; svc_stop; fi
-    cp -f "$BIN_PATH" "${BIN_PATH}.bak"
-    if download_binary "$latest"; then
-        rm -f "${BIN_PATH}.bak"
-        info "已更新到 $latest"
-    else
-        mv -f "${BIN_PATH}.bak" "$BIN_PATH"
-        (( was_running )) && svc_start
-        err "更新失败，已回滚到 $current"
+    if ! prepare_binary "$latest"; then
+        cleanup_prepared_binary
+        err "无法准备 bililive-go ${latest}；当前版本未更改"
     fi
-    (( was_running )) && svc_start
+    backup_dir=$(mktemp -d "${INSTALL_DIR}/.update.XXXXXX") \
+        || { cleanup_prepared_binary; err "无法创建升级备份目录；当前版本未更改"; }
+    if ! cp -p "$BIN_PATH" "$backup_dir/bililive-go"; then
+        cleanup_prepared_binary
+        rm -rf "$backup_dir"
+        err "无法备份当前二进制；当前版本未更改"
+    fi
+    if [[ -f "$VER_FILE" ]]; then
+        had_version=1
+        if ! cp -p "$VER_FILE" "$backup_dir/version"; then
+            cleanup_prepared_binary
+            rm -rf "$backup_dir"
+            err "无法备份当前版本记录；当前版本未更改"
+        fi
+    fi
+
+    if svc_running; then
+        was_running=1
+        if ! svc_stop || svc_running; then
+            cleanup_prepared_binary
+            rm -rf "$backup_dir"
+            if (( was_running )) && ! svc_running; then
+                svc_start || warn "停止失败后无法重新启动服务"
+            fi
+            err "无法确认服务已停止；当前版本未更改"
+        fi
+    fi
+
+    if ! publish_prepared_binary "$latest"; then
+        cleanup_prepared_binary
+        rollback_update "$backup_dir" "$current" "$had_version" "$was_running"
+        err "发布新版本失败，已尝试回滚到 $current"
+    fi
+    cleanup_prepared_binary
+
+    if (( was_running )) && { ! svc_start || ! wait_for_service_running; }; then
+        rollback_update "$backup_dir" "$current" "$had_version" "$was_running"
+        err "新版本启动失败，已尝试回滚到 $current"
+    fi
+    rm -rf "$backup_dir"
+    info "已更新到 $latest"
     info "更新完成"
 }
 
@@ -405,15 +584,17 @@ EOF
 }
 
 # ---------- 入口 ----------
-case "${1:-help}" in
-    install)   cmd_install ;;
-    start)     cmd_start ;;
-    stop)      cmd_stop ;;
-    restart)   cmd_restart ;;
-    status)    cmd_status ;;
-    port)      cmd_port "${2:-}" ;;
-    update)    cmd_update ;;
-    log)       cmd_log ;;
-    uninstall) cmd_uninstall ;;
-    *)         usage ;;
-esac
+if [[ "${BILI_SCRIPT_LIBRARY_ONLY:-0}" != 1 ]]; then
+    case "${1:-help}" in
+        install)   cmd_install ;;
+        start)     cmd_start ;;
+        stop)      cmd_stop ;;
+        restart)   cmd_restart ;;
+        status)    cmd_status ;;
+        port)      cmd_port "${2:-}" ;;
+        update)    cmd_update ;;
+        log)       cmd_log ;;
+        uninstall) cmd_uninstall ;;
+        *)         usage ;;
+    esac
+fi
